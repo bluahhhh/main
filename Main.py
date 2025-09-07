@@ -7,8 +7,20 @@ from PyQt5 import QtWidgets, QtGui, QtCore, uic
 from qt_material import apply_stylesheet
 import keyboard
 
-from crosshair_overlay import CrosshairOverlay
-from crosshair_picker import CrosshairPickerDialog
+# Try to import crosshair modules, but handle gracefully if they're missing
+try:
+    from crosshair_overlay import CrosshairOverlay
+    CROSSHAIR_OVERLAY_AVAILABLE = True
+except ImportError:
+    CrosshairOverlay = None
+    CROSSHAIR_OVERLAY_AVAILABLE = False
+
+try:
+    from crosshair_picker import CrosshairPickerDialog
+    CROSSHAIR_PICKER_AVAILABLE = True
+except ImportError:
+    CrosshairPickerDialog = None
+    CROSSHAIR_PICKER_AVAILABLE = False
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MACRO_FOLDER = os.path.join(SCRIPT_DIR, "macros")
@@ -505,13 +517,17 @@ QListWidget::item {{
 
     @QtCore.pyqtSlot()
     def toggle_crosshair(self):
-        self.crosshair_enabled = not self.crosshair_enabled
-        self.settings["crosshair_enabled"] = self.crosshair_enabled
-        self.save_settings()
-        if self.crosshair_enabled and self.crosshair_settings:
-            self.create_crosshair_overlay()
-        else:
-            self.hide_crosshair_overlay()
+        try:
+            self.crosshair_enabled = not self.crosshair_enabled
+            self.settings["crosshair_enabled"] = self.crosshair_enabled
+            self.save_settings()
+            if self.crosshair_enabled and self.crosshair_settings:
+                self.create_crosshair_overlay()
+            else:
+                self.hide_crosshair_overlay()
+        except Exception as e:
+            self.statusBar().showMessage(f"Error toggling crosshair: {str(e)}", 5000)
+            print(f"Error toggling crosshair: {e}")
 
     @QtCore.pyqtSlot()
     def play_macro(self):
@@ -773,83 +789,131 @@ QListWidget::item {{
                 "settings_dialog.ui not found. Basic settings unavailable.")
 
     def show_crosshair_picker(self):
-        live_overlay = self.crosshair_overlay if (self.crosshair_enabled and self.crosshair_settings) else None
-        picker = CrosshairPickerDialog(
-            CROSSHAIR_FOLDER,
-            crosshair_settings=self.crosshair_settings if self.crosshair_settings else {},
-            crosshair_enabled=self.crosshair_enabled,
-            parent=self,
-            live_overlay=live_overlay
-        )
-        picker.settings_changed.connect(self.on_picker_overlay_changed)
-        result = picker.exec_()
-        picker.settings_changed.disconnect(self.on_picker_overlay_changed)
-        if result == QtWidgets.QDialog.Accepted:
-            self.crosshair_settings = picker.get_crosshair_settings()
-            self.crosshair_enabled = self.crosshair_settings.get("enabled", False)
-            self.settings["crosshair_settings"] = self.crosshair_settings
-            self.settings["crosshair_enabled"] = self.crosshair_enabled
-            self.save_settings()
-            self.create_crosshair_overlay()
-        else:
+        # Check if crosshair picker module is available
+        if not CROSSHAIR_PICKER_AVAILABLE:
+            QtWidgets.QMessageBox.warning(
+                self, 
+                "Crosshair Picker Unavailable", 
+                "The crosshair picker feature is not available.\n\n"
+                "Required module 'crosshair_picker.py' is missing.\n"
+                "Please ensure all application files are present."
+            )
+            self.statusBar().showMessage("Crosshair picker unavailable - missing module", 5000)
+            return
+        
+        try:
+            live_overlay = self.crosshair_overlay if (self.crosshair_enabled and self.crosshair_settings) else None
+            picker = CrosshairPickerDialog(
+                CROSSHAIR_FOLDER,
+                crosshair_settings=self.crosshair_settings if self.crosshair_settings else {},
+                crosshair_enabled=self.crosshair_enabled,
+                parent=self,
+                live_overlay=live_overlay
+            )
+            picker.settings_changed.connect(self.on_picker_overlay_changed)
+            result = picker.exec_()
+            picker.settings_changed.disconnect(self.on_picker_overlay_changed)
+            if result == QtWidgets.QDialog.Accepted:
+                self.crosshair_settings = picker.get_crosshair_settings()
+                self.crosshair_enabled = self.crosshair_settings.get("enabled", False)
+                self.settings["crosshair_settings"] = self.crosshair_settings
+                self.settings["crosshair_enabled"] = self.crosshair_enabled
+                self.save_settings()
+                self.create_crosshair_overlay()
+            else:
+                if self.crosshair_overlay:
+                    self.crosshair_overlay.close()
+                    self.crosshair_overlay = None
+                if self.crosshair_enabled and self.crosshair_settings:
+                    self.create_crosshair_overlay()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Crosshair Picker Error",
+                f"An error occurred while opening the crosshair picker:\n\n{str(e)}\n\n"
+                "The crosshair picker feature may not be functioning correctly."
+            )
+            self.statusBar().showMessage(f"Crosshair picker error: {str(e)}", 5000)
+            print(f"Crosshair picker error: {e}")
+
+    def on_picker_overlay_changed(self, settings):
+        # Check if crosshair overlay module is available
+        if not CROSSHAIR_OVERLAY_AVAILABLE:
+            self.statusBar().showMessage("Crosshair overlay unavailable - missing module", 3000)
+            return
+        
+        try:
+            if self.crosshair_overlay:
+                if settings.get("enabled", False):
+                    self.crosshair_overlay.update_settings(settings)
+                    self.crosshair_overlay.show()
+                else:
+                    self.crosshair_overlay.hide()
+            else:
+                if settings.get("enabled", False):
+                    self.crosshair_overlay = CrosshairOverlay(
+                        style=settings.get("style", "lines"),
+                        color=settings.get("color", "#ff5ea2"),
+                        size=settings.get("size", 40),
+                        opacity=settings.get("opacity", 1.0),
+                        image_path=settings.get("image_path"),
+                        thickness=settings.get("thickness", 3),
+                        gap=settings.get("gap", 0),
+                        outline_enabled=settings.get("outline_enabled", False),
+                        outline_color=settings.get("outline_color", "#000000"),
+                        outline_thickness=settings.get("outline_thickness", 2),
+                        dot_enabled=settings.get("dot_enabled", False),
+                        dot_color=settings.get("dot_color", settings.get("color", "#ff5ea2")),
+                        dot_size=settings.get("dot_size", 6),
+                    )
+                    self.crosshair_overlay.show()
+        except Exception as e:
+            self.statusBar().showMessage(f"Crosshair overlay error: {str(e)}", 5000)
+            print(f"Crosshair overlay error: {e}")
+
+    def create_crosshair_overlay(self):
+        # Check if crosshair overlay module is available
+        if not CROSSHAIR_OVERLAY_AVAILABLE:
+            self.statusBar().showMessage("Crosshair overlay unavailable - missing module", 3000)
+            return
+        
+        try:
             if self.crosshair_overlay:
                 self.crosshair_overlay.close()
                 self.crosshair_overlay = None
             if self.crosshair_enabled and self.crosshair_settings:
-                self.create_crosshair_overlay()
-
-    def on_picker_overlay_changed(self, settings):
-        if self.crosshair_overlay:
-            if settings.get("enabled", False):
-                self.crosshair_overlay.update_settings(settings)
-                self.crosshair_overlay.show()
-            else:
-                self.crosshair_overlay.hide()
-        else:
-            if settings.get("enabled", False):
+                s = self.crosshair_settings
                 self.crosshair_overlay = CrosshairOverlay(
-                    style=settings.get("style", "lines"),
-                    color=settings.get("color", "#ff5ea2"),
-                    size=settings.get("size", 40),
-                    opacity=settings.get("opacity", 1.0),
-                    image_path=settings.get("image_path"),
-                    thickness=settings.get("thickness", 3),
-                    gap=settings.get("gap", 0),
-                    outline_enabled=settings.get("outline_enabled", False),
-                    outline_color=settings.get("outline_color", "#000000"),
-                    outline_thickness=settings.get("outline_thickness", 2),
-                    dot_enabled=settings.get("dot_enabled", False),
-                    dot_color=settings.get("dot_color", settings.get("color", "#ff5ea2")),
-                    dot_size=settings.get("dot_size", 6),
+                    style=s.get("style", "lines"),
+                    color=s.get("color", "#ff5ea2"),
+                    size=s.get("size", 40),
+                    opacity=s.get("opacity", 1.0),
+                    image_path=s.get("image_path"),
+                    thickness=s.get("thickness", 3),
+                    gap=s.get("gap", 0),
+                    outline_enabled=s.get("outline_enabled", False),
+                    outline_color=s.get("outline_color", "#000000"),
+                    outline_thickness=s.get("outline_thickness", 2),
+                    dot_enabled=s.get("dot_enabled", False),
+                    dot_color=s.get("dot_color", s.get("color", "#ff5ea2")),
+                    dot_size=s.get("dot_size", 6),
                 )
                 self.crosshair_overlay.show()
-
-    def create_crosshair_overlay(self):
-        if self.crosshair_overlay:
-            self.crosshair_overlay.close()
+        except Exception as e:
+            self.statusBar().showMessage(f"Crosshair overlay creation error: {str(e)}", 5000)
+            print(f"Crosshair overlay creation error: {e}")
+            # Reset crosshair_overlay to None if creation failed
             self.crosshair_overlay = None
-        if self.crosshair_enabled and self.crosshair_settings:
-            s = self.crosshair_settings
-            self.crosshair_overlay = CrosshairOverlay(
-                style=s.get("style", "lines"),
-                color=s.get("color", "#ff5ea2"),
-                size=s.get("size", 40),
-                opacity=s.get("opacity", 1.0),
-                image_path=s.get("image_path"),
-                thickness=s.get("thickness", 3),
-                gap=s.get("gap", 0),
-                outline_enabled=s.get("outline_enabled", False),
-                outline_color=s.get("outline_color", "#000000"),
-                outline_thickness=s.get("outline_thickness", 2),
-                dot_enabled=s.get("dot_enabled", False),
-                dot_color=s.get("dot_color", s.get("color", "#ff5ea2")),
-                dot_size=s.get("dot_size", 6),
-            )
-            self.crosshair_overlay.show()
 
     def hide_crosshair_overlay(self):
-        if self.crosshair_overlay:
-            self.crosshair_overlay.close()
+        try:
+            if self.crosshair_overlay:
+                self.crosshair_overlay.close()
+                self.crosshair_overlay = None
+        except Exception as e:
+            self.statusBar().showMessage(f"Error hiding crosshair overlay: {str(e)}", 3000)
+            print(f"Error hiding crosshair overlay: {e}")
+            # Force reset the overlay reference even if close() failed
             self.crosshair_overlay = None
 
     def get_macro_info(self, macro_file):
