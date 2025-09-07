@@ -470,36 +470,59 @@ QListWidget::item {{
             keyboard.unhook_all_hotkeys()
         except Exception:
             pass
-        hotkey = self.settings.get("hide_hotkey", "F9")
-        def hotkey_callback():
-            QtCore.QMetaObject.invokeMethod(self, "toggle_visibility", QtCore.Qt.QueuedConnection)
-        keyboard.add_hotkey(hotkey, hotkey_callback, suppress=False)
+        
+        try:
+            hotkey = self.settings.get("hide_hotkey", "F9")
+            def hotkey_callback():
+                QtCore.QMetaObject.invokeMethod(self, "toggle_visibility", QtCore.Qt.QueuedConnection)
+            keyboard.add_hotkey(hotkey, hotkey_callback, suppress=False)
+        except ImportError as e:
+            if "root" in str(e).lower():
+                self.statusBar().showMessage("Global hotkeys unavailable - requires root access", 5000)
+                print("Warning: Global hotkeys require root access on Linux")
+            else:
+                self.statusBar().showMessage(f"Global hotkeys unavailable: {str(e)}", 5000)
+                print(f"Warning: Global hotkeys error: {e}")
+        except Exception as e:
+            self.statusBar().showMessage(f"Global hotkeys error: {str(e)}", 5000)
+            print(f"Warning: Global hotkeys setup failed: {e}")
 
     def setup_action_hotkeys(self):
-        for key in [
-            "play_hotkey", "pause_hotkey", "stop_hotkey", "reload_hotkey", "crosshair_toggle_hotkey"
-        ]:
-            hotkey = self.settings.get(key)
-            if hotkey:
-                try:
-                    keyboard.remove_hotkey(hotkey)
-                except Exception:
-                    pass
-        hotkey_map = {
-            "play_hotkey": self.play_macro,
-            "pause_hotkey": self.pause_macro,
-            "stop_hotkey": self.stop_macro,
-            "reload_hotkey": self.reload_macros,
-            "crosshair_toggle_hotkey": self.toggle_crosshair,
-        }
-        for key, func in hotkey_map.items():
-            hotkey = self.settings.get(key)
-            if hotkey:
-                keyboard.add_hotkey(
-                    hotkey,
-                    lambda f=func: QtCore.QMetaObject.invokeMethod(self, f.__name__, QtCore.Qt.QueuedConnection),
-                    suppress=False
-                )
+        try:
+            for key in [
+                "play_hotkey", "pause_hotkey", "stop_hotkey", "reload_hotkey", "crosshair_toggle_hotkey"
+            ]:
+                hotkey = self.settings.get(key)
+                if hotkey:
+                    try:
+                        keyboard.remove_hotkey(hotkey)
+                    except Exception:
+                        pass
+            hotkey_map = {
+                "play_hotkey": self.play_macro,
+                "pause_hotkey": self.pause_macro,
+                "stop_hotkey": self.stop_macro,
+                "reload_hotkey": self.reload_macros,
+                "crosshair_toggle_hotkey": self.toggle_crosshair,
+            }
+            for key, func in hotkey_map.items():
+                hotkey = self.settings.get(key)
+                if hotkey:
+                    keyboard.add_hotkey(
+                        hotkey,
+                        lambda f=func: QtCore.QMetaObject.invokeMethod(self, f.__name__, QtCore.Qt.QueuedConnection),
+                        suppress=False
+                    )
+        except ImportError as e:
+            if "root" in str(e).lower():
+                self.statusBar().showMessage("Action hotkeys unavailable - requires root access", 5000)
+                print("Warning: Action hotkeys require root access on Linux")
+            else:
+                self.statusBar().showMessage(f"Action hotkeys unavailable: {str(e)}", 5000)
+                print(f"Warning: Action hotkeys error: {e}")
+        except Exception as e:
+            self.statusBar().showMessage(f"Action hotkeys error: {str(e)}", 5000)
+            print(f"Warning: Action hotkeys setup failed: {e}")
 
     @QtCore.pyqtSlot()
     def toggle_visibility(self):
